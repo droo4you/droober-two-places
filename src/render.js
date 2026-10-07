@@ -433,7 +433,7 @@ function drawHUD(ctx, w, game) {
   tab(3, 'D', w.active === 'droober', () => drawFrame(ctx, 'front', -4, -8, false, 37, 42));
   tab(27, 'R', w.active === 'rc', () => drawFrame(ctx, 'rcFront', 31, 6, false));
   if (w.rc.mode === 'ride') { px(ctx, C.ink, 26, 11, 2, 2); }
-  drawText(ctx, game.padHint ? 'LB' : 'Q', 51, 10, C.cream, 1, C.ink);
+  if (!Input.usingTouch) drawText(ctx, game.padHint ? 'LB' : 'Q', 51, 10, C.cream, 1, C.ink);
   // apples
   panel(ctx, VIEW_W - 82, 3, 38, 14);
   drawApple(ctx, { x: VIEW_W - 79, y: 4 }, 0);
@@ -471,7 +471,7 @@ function drawHUD(ctx, w, game) {
   const f = w.focus();
   const sign = w.signs.find(s => Math.abs(s.x + 8 - (f.x + f.w / 2)) < 30 && Math.abs(s.y + 8 - (f.y + f.h / 2)) < 40);
   if (sign && w.state === 'play') {
-    const lines = wrapText(sign.text, 300);
+    const lines = wrapText(Input.usingTouch ? touchify(sign.text) : sign.text, 300);
     const h = lines.length * 9 + 8;
     panel(ctx, VIEW_W / 2 - 160, VIEW_H - h - 6, 320, h);
     lines.forEach((l, i) => drawTextC(ctx, l, VIEW_W / 2, VIEW_H - h - 2 + i * 9, C.ink));

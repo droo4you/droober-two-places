@@ -14,6 +14,12 @@ Vanilla canvas puzzle-platformer, zero deps, no build step. Classic `<script>` t
 - Shroomwood look (user's brief): light blue sky, tree-sized mushrooms (red/white spots, blue/green spots),
   berry bushes, trees with weird branches and layered canopies. Forms and the chest void are planned later, not now.
 
+## Mobile
+- `src/touch.js` (TouchPad) feeds the same actions as the keyboard. On touch the page becomes a handheld shell
+  (#shell/#bezel in index.html, portrait = Game Boy, landscape = wide handheld); desktop hides the shell via display: contents.
+- Sign text is rewritten for touch by `touchify()`. New signs that name keys need a matching rule there.
+- To preview phone layouts in Chrome, load the game in phone-sized iframes and call `TouchPad.enable()` via frame eval.
+
 ## Working rules
 - After touching `src/world.js` or `src/levels.js`, run `node tests/solve.mjs`. The bot routes in
   `tests/solve.mjs` + `tests/solve2.mjs` are the proof each level is solvable; update the route when you change a level.

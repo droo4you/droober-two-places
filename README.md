@@ -13,6 +13,9 @@ node serve.mjs        # http://localhost:5177/
 
 Opening `index.html` directly also works (classic scripts, no modules, no build step).
 
+On phones it turns into a Droober handheld: Game Boy style in portrait (screen on top, cross d-pad, JUMP/USE,
+SKILL/CALL, SWAP/PAUSE pills), wide-handheld style in landscape. Push the d-pad to its rim to run.
+
 ## Who can do what
 
 | | Droober | RC |

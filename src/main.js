@@ -151,7 +151,7 @@ function drawTitle() {
     if (sel) panel(ctx, VIEW_W / 2 - 60, y - 3, 120, 13, C.yellow);
     drawTextC(ctx, label, VIEW_W / 2, y, sel ? C.ink : C.cream, 1, sel ? null : C.ink);
   });
-  drawTextC(ctx, 'SPACE / ENTER TO PICK. M MUTES.', VIEW_W / 2, 204, C.cream, 1, C.ink);
+  drawTextC(ctx, Input.usingTouch ? 'TAP JUMP TO PICK.' : 'SPACE / ENTER TO PICK. M MUTES.', VIEW_W / 2, 204, C.cream, 1, C.ink);
 }
 function drawSelect() {
   const page = Math.floor(game.menuIndex / 10), world = page + 1;
@@ -191,7 +191,18 @@ function drawControls() {
   ctx.fillStyle = 'rgba(34,22,58,0.75)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   panel(ctx, 20, 10, 344, 196);
   drawTextC(ctx, 'CONTROLS', VIEW_W / 2, 16, C.ink, 2);
-  const rows = [
+  const rows = Input.usingTouch ? [
+    ['MOVE / FLY', 'THE PAD (LEFT SIDE)'],
+    ['RUN', 'PUSH THE PAD TO THE RIM'],
+    ['JUMP / DOUBLE', 'JUMP (TAP TWICE)'],
+    ['CROUCH', 'PAD DOWN'],
+    ['GRAB / THROW / USE', 'USE   (DOWN+USE SETS DOWN)'],
+    ['SWAP DROOBER/RC', 'SWAP'],
+    ['CALL RC / DROP RC', 'CALL'],
+    ['GLIDE', 'RC ABOARD: DOUBLE JUMP, HOLD'],
+    ['SMOKE / PAINT GOO', 'SKILL (WORLD 2)'],
+    ['PAUSE / RESTART', 'II BUTTON'],
+  ] : [
     ['MOVE', 'A/D OR ARROWS'],
     ['JUMP / DOUBLE', 'SPACE (TWICE)'],
     ['RUN', 'SHIFT'],
@@ -209,8 +220,8 @@ function drawControls() {
     drawText(ctx, a, 30, 36 + i * 12, C.purpleD);
     drawText(ctx, b, 168, 36 + i * 12, C.ink);
   });
-  drawTextC(ctx, 'PAD: A JUMP X USE B CALL Y SMOKE/GOO LB/RB SWAP RT RUN', VIEW_W / 2, 176, C.purpleD);
-  drawTextC(ctx, 'PRESS SPACE', VIEW_W / 2, 192, C.ink);
+  if (!Input.usingTouch) drawTextC(ctx, 'PAD: A JUMP X USE B CALL Y SMOKE/GOO LB/RB SWAP RT RUN', VIEW_W / 2, 176, C.purpleD);
+  drawTextC(ctx, Input.usingTouch ? 'TAP JUMP' : 'PRESS SPACE', VIEW_W / 2, 192, C.ink);
 }
 function drawClear() {
   const w = game.world, t = w.stateT;
@@ -222,7 +233,7 @@ function drawClear() {
   drawText(ctx, `APPLES ${w.applesGot()}/${w.appleTotal}`, VIEW_W / 2 - 36, 75, C.ink);
   drawText(ctx, `TIME   ${fmtTime(game.levelTime)}${game.newBest ? '  BEST!' : ''}`, VIEW_W / 2 - 50, 89, C.ink);
   drawText(ctx, `OOPS   ${game.deaths}`, VIEW_W / 2 - 50, 101, C.ink);
-  if ((game.frame >> 4) % 2) drawTextC(ctx, game.levelIndex + 1 < LEVELS.length ? 'SPACE: NEXT LEVEL' : 'SPACE: FINISH', VIEW_W / 2, 120, C.purpleD);
+  if ((game.frame >> 4) % 2) drawTextC(ctx, (Input.usingTouch ? 'JUMP' : 'SPACE') + (game.levelIndex + 1 < LEVELS.length ? ': NEXT LEVEL' : ': FINISH'), VIEW_W / 2, 120, C.purpleD);
 }
 function drawEnd() {
   drawBackground(ctx, game.frame * 0.6, 0, game.frame, worldOf(LEVELS.length - 1));
@@ -240,7 +251,7 @@ function drawEnd() {
     const x = (hash(i, 1) * VIEW_W + game.frame * (0.3 + hash(i, 2))) % VIEW_W, y = (hash(i, 3) * VIEW_H + game.frame * (0.5 + hash(i, 4))) % 170;
     px(ctx, CH_COLORS[i % 6], Math.round(x), Math.round(y), 2, 2);
   }
-  if (game.frame > 90 && (game.frame >> 4) % 2) drawTextC(ctx, 'PRESS SPACE', VIEW_W / 2, 200, C.cream, 1, C.ink);
+  if (game.frame > 90 && (game.frame >> 4) % 2) drawTextC(ctx, Input.usingTouch ? 'TAP JUMP' : 'PRESS SPACE', VIEW_W / 2, 200, C.cream, 1, C.ink);
 }
 
 function draw() {
@@ -266,10 +277,30 @@ function draw() {
 
 // ---------- scaling & loop ----------
 function fit() {
-  const s = Math.max(1, Math.floor(Math.min(innerWidth / VIEW_W, innerHeight / VIEW_H)));
-  const scale = Math.min(innerWidth / VIEW_W, innerHeight / VIEW_H) >= 1 ? s : Math.min(innerWidth / VIEW_W, innerHeight / VIEW_H);
-  canvas.style.width = VIEW_W * scale + 'px';
-  canvas.style.height = VIEW_H * scale + 'px';
+  const body = document.body;
+  const touch = body.classList.contains('touch-on');
+  const portrait = touch && innerHeight > innerWidth;
+  body.classList.toggle('portrait', portrait);
+  body.classList.toggle('landscape', touch && !portrait);
+  let k;
+  if (portrait) k = innerWidth * 0.8 / VIEW_W;                       // Game Boy: screen up top, buttons below
+  else if (touch) {                                                   // wide handheld: grips on both sides
+    const grip = Math.min(innerWidth * 0.24, 230);
+    k = Math.min((innerWidth - 2 * grip) / VIEW_W, (innerHeight * 0.78) / VIEW_H);
+  } else {
+    k = Math.min(innerWidth / VIEW_W, innerHeight / VIEW_H);
+    if (k >= 1) k = Math.floor(k);
+  }
+  canvas.style.width = VIEW_W * k + 'px';
+  canvas.style.height = VIEW_H * k + 'px';
+  if (portrait) {
+    // controls sit just under the logo, wherever the screen ends on this phone
+    const brand = document.querySelector('.brand');
+    if (brand && brand.getBoundingClientRect) {
+      const top = brand.getBoundingClientRect().bottom, u = Math.min(innerWidth / 100, 6), block = 72 * u;
+      document.documentElement.style.setProperty('--ctl-top', top + Math.max(0, (innerHeight - top - block) * 0.4) + 'px');
+    }
+  }
 }
 addEventListener('resize', fit);
 fit();
@@ -284,9 +315,14 @@ function loop(now) {
 }
 
 Input.init();
+TouchPad.init();
 Audio8.muted = save.muted;
 SPRITES = new Image();
 SPRITES.onload = () => requestAnimationFrame(loop);
 SPRITES.src = 'assets/sprites.png';
-canvas.addEventListener('pointerdown', () => { Audio8.init(); canvas.focus(); });
+canvas.addEventListener('pointerdown', () => {
+  Audio8.init(); canvas.focus();
+  // on menus and result cards, tapping the game itself confirms
+  if (game.screen !== 'play' || (game.world && game.world.state === 'clear')) Input.downs.add('confirm');
+});
 window.__game = game; // handy for poking at state from devtools

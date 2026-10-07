@@ -17,6 +17,7 @@ const Input = {
   prev: {},
   held: {}, pressed: {},
   usingPad: false,
+  usingTouch: false,
   init() {
     addEventListener('keydown', e => {
       const a = KEYMAP[e.code];
@@ -27,6 +28,7 @@ const Input = {
   },
   poll() {
     const now = new Set(this.keys);
+    if (typeof TouchPad !== 'undefined') for (const a of TouchPad.held) now.add(a);
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     for (const p of pads) {
       if (!p) continue;
