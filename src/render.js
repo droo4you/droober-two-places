@@ -38,6 +38,7 @@ function drawFrameAt(ctx, name, cx, by, facing, scale = 1) {
 
 // ---------- level prerender ----------
 function prerenderLevel(world) {
+  if (world.def.world === 2) return prerenderShroom(world);
   const cv = document.createElement('canvas');
   cv.width = world.W * TILE; cv.height = world.H * TILE;
   const g = cv.getContext('2d');
@@ -134,7 +135,8 @@ function circle(ctx, cx, cy, r) {
     ctx.fillRect(cx - w, cy + y, w * 2, 1);
   }
 }
-function drawBackground(ctx, camX, camY, frame) {
+function drawBackground(ctx, camX, camY, frame, theme = 1) {
+  if (theme === 2) return drawShroomBackground(ctx, camX, camY, frame);
   if (!BG_CACHE) BG_CACHE = buildBackground();
   ctx.drawImage(BG_CACHE, 0, 0);
   // drifting cream clouds
@@ -153,7 +155,7 @@ function drawBackground(ctx, camX, camY, frame) {
 // ---------- world ----------
 function drawWorld(ctx, w, levelCanvas) {
   const cx = Math.round(w.camX), cy = Math.round(w.camY);
-  drawBackground(ctx, cx, cy, w.frame);
+  drawBackground(ctx, cx, cy, w.frame, w.def.world || 1);
   ctx.save();
   ctx.translate(-cx, -cy);
   drawWires(ctx, w);
@@ -161,20 +163,25 @@ function drawWorld(ctx, w, levelCanvas) {
   if (w.exit) drawExit(ctx, w);
   for (const m of w.movers) drawMoverTrack(ctx, m);
   ctx.drawImage(levelCanvas, 0, 0);
+  drawGoo(ctx, w);
+  drawWorld2Layer(ctx, w);
   for (const p of w.plates) drawPlate(ctx, w, p);
   for (const b of w.buttons) drawButton(ctx, w, b);
   for (const l of w.levers) drawLever(ctx, w, l);
   for (const k of w.cranks) drawCrank(ctx, w, k);
   for (const d of w.doors) drawDoor(ctx, w, d);
   for (const m of w.movers) drawMover(ctx, w, m);
-  for (const j of w.juice) if (!j.got) drawJuice(ctx, j, w.frame);
+  for (const j of w.apples) if (!j.got) drawApple(ctx, j, w.frame);
   for (const b of w.blocks) drawBlock(ctx, b);
   for (const c of w.crates) if (!c.held) drawCrate(ctx, c);
   for (const z of w.zaps) drawZap(ctx, w, z);
+  for (const s of w.shadows) drawShadow(ctx, w, s);
   drawDroober(ctx, w);
   drawRC(ctx, w);
+  if (w.rc.painting && w.rc.mode !== 'ride') { const r = w.rc; for (let i = 0; i < 2; i++) w.fx.push({ kind: 'drip', x: r.x + Math.random() * r.w, y: r.y + Math.random() * r.h, vx: 0, vy: 0.3, life: 12, color: r.thick > 0 ? S2.thick : S2.goo }); }
   if (w.droober.carry) drawCrate(ctx, w.droober.carry);
   if (w.rc.mode === 'ride' && !w.droober.gliding) drawRC(ctx, w, true);
+  drawSmoke(ctx, w);
   drawFx(ctx, w);
   drawActiveMarker(ctx, w);
   ctx.restore();
@@ -356,13 +363,15 @@ function drawDroober(ctx, w) {
   let frame = 'three', bob = 0;
   const moving = Math.abs(d.vx) > 0.25;
   if (w.state === 'clear') frame = 'wave';
+  else if (d.hang) frame = Math.floor(d.anim) % 2 ? 'jump' : 'wave';
+  else if (d.cling) { frame = Math.floor(d.anim) % 2 ? 'side' : 'three'; }
   else if (d.crouch) frame = 'crouch';
   else if (!w.grounded(d)) frame = 'jump';
   else if (d.cranking) { frame = (w.frame >> 3) % 2 ? 'side' : 'three'; }
   else if (moving) { frame = Math.floor(d.anim) % 2 ? 'run' : 'side'; bob = Math.floor(d.anim) % 2 ? 0 : 1; }
   else if (w.frame % 400 > 330 && w.active !== 'droober') frame = 'front';
   else bob = (w.frame >> 5) % 2;
-  const by = d.y + d.h + 1 + (d.landT > 0 ? 1 : 0);
+  const by = d.y + d.h + 1 + (d.landT > 0 ? 1 : 0) - (d.hang ? 9 : 0);   // hanging: raised so the hand meets the goo
   drawFrameAt(ctx, frame, d.x + d.w / 2, by + bob - (bob ? 1 : 0), d.facing);
 }
 function drawRC(ctx, w, onTop = false) {
@@ -425,10 +434,10 @@ function drawHUD(ctx, w, game) {
   tab(27, 'R', w.active === 'rc', () => drawFrame(ctx, 'rcFront', 31, 6, false));
   if (w.rc.mode === 'ride') { px(ctx, C.ink, 26, 11, 2, 2); }
   drawText(ctx, game.padHint ? 'LB' : 'Q', 51, 10, C.cream, 1, C.ink);
-  // juice
+  // apples
   panel(ctx, VIEW_W - 82, 3, 38, 14);
-  drawJuice(ctx, { x: VIEW_W - 79, y: 4 }, 0);
-  drawText(ctx, `${w.juiceGot()}/${w.juiceTotal}`, VIEW_W - 67, 7, C.ink);
+  drawApple(ctx, { x: VIEW_W - 79, y: 4 }, 0);
+  drawText(ctx, `${w.applesGot()}/${w.appleTotal}`, VIEW_W - 67, 7, C.ink);
   // time
   panel(ctx, VIEW_W - 42, 3, 39, 14);
   drawText(ctx, fmtTime(game.levelTime), VIEW_W - 39, 7, C.ink);
@@ -457,6 +466,7 @@ function drawHUD(ctx, w, game) {
     drawTextC(ctx, t.text, VIEW_W / 2, 63, C.ink);
     ctx.globalAlpha = 1;
   }
+  drawWorld2HUD(ctx, w);
   // signs near the active character
   const f = w.focus();
   const sign = w.signs.find(s => Math.abs(s.x + 8 - (f.x + f.w / 2)) < 30 && Math.abs(s.y + 8 - (f.y + f.h / 2)) < 40);

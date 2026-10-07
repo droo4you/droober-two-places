@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-export function loadGame(files = ['src/world.js', 'src/levels.js']) {
+export function loadGame(files = ['src/world.js', 'src/levels.js', 'src/levels2.js']) {
   const ctx = vm.createContext({ console, Math });
   const code = files.filter(f => fs.existsSync(f)).map(f => fs.readFileSync(f, 'utf8')).join('\n;\n')
     + '\n;globalThis.__g = { World, PHYS, TILE, LEVELS: typeof LEVELS !== "undefined" ? LEVELS : null };';
@@ -16,7 +16,7 @@ export function makeInput() {
   return keys => {
     const now = new Set(keys);
     const held = {}, pressed = {};
-    for (const k of ['left', 'right', 'up', 'down', 'jump', 'run', 'act', 'swap', 'call']) {
+    for (const k of ['left', 'right', 'up', 'down', 'jump', 'run', 'act', 'swap', 'call', 'ability']) {
       held[k] = now.has(k); pressed[k] = now.has(k) && !prev.has(k);
     }
     prev = now;

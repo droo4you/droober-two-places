@@ -6,10 +6,10 @@ const KEYMAP = {
   ShiftLeft: 'run', ShiftRight: 'run', KeyX: 'run',
   KeyE: 'act', KeyJ: 'act', Enter: 'confirm',
   Tab: 'swap', KeyQ: 'swap',
-  KeyF: 'call', KeyL: 'call',
+  KeyF: 'call', KeyL: 'call', KeyC: 'ability', KeyG: 'ability',
   KeyR: 'restart', Escape: 'pause', KeyP: 'pause', KeyM: 'mute',
 };
-const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'run', 'act', 'swap', 'call', 'restart', 'pause', 'mute', 'confirm'];
+const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'run', 'act', 'swap', 'call', 'restart', 'pause', 'mute', 'confirm', 'ability'];
 
 const Input = {
   keys: new Set(),
@@ -40,7 +40,8 @@ const Input = {
       if (b(0)) { now.add('jump'); now.add('confirm'); }
       if (b(2)) now.add('act');
       if (b(1)) now.add('call');
-      if (b(3) || b(4) || b(5)) now.add('swap');
+      if (b(4) || b(5)) now.add('swap');
+      if (b(3)) now.add('ability');
       if (b(6) || b(7)) now.add('run');
       if (b(9)) now.add('pause');
       if (b(8)) now.add('restart');

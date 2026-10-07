@@ -13,6 +13,8 @@ const PHYS = {
   dw: 14, standH: 38, crouchH: 26,
   rcW: 12, rcH: 11, rcSpeed: 1.8, rcFast: 2.6, rcAccel: 0.22, rcSink: 0.07, rcMaxSink: 1.5,
   crate: 14,
+  gooLife: 600, smokeLife: 240, smokeCD: 360, fanForce: 0.42, climb: 1.1, shimmy: 1.1,
+  shadowSee: 24,
 };
 
 const overlaps = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
@@ -27,7 +29,10 @@ class World {
     this.H = def.grid.length;
     this.tiles = new Uint8Array(this.W * this.H);
     this.crates = []; this.blocks = []; this.plates = []; this.buttons = []; this.levers = [];
-    this.cranks = []; this.doors = []; this.movers = []; this.zaps = []; this.juice = []; this.signs = [];
+    this.cranks = []; this.doors = []; this.movers = []; this.zaps = []; this.apples = []; this.signs = [];
+    this.fans = []; this.shadows = []; this.smokes = []; this.portals = []; this.boxes = []; this.straws = []; this.puddles = [];
+    this.goo = new Map(); // tile index -> { until: frame, thick }
+    this.powers = def.world >= 2; // smoke + goo unlock in world 2
     this.events = []; this.fx = []; this.toasts = [];
     this.frame = 0; this.active = 'droober'; this.state = 'play'; this.stateT = 0;
     this.signal = new Map();
@@ -37,7 +42,7 @@ class World {
       if (ch === 'D') this.droober = this.makeDroober(tx, ty);
       else if (ch === 'R') this.rc = this.makeRC(tx * TILE + 2, (ty + 1) * TILE - PHYS.rcH);
       else if (ch === 'E') this.exit = { x: tx * TILE, y: (ty + 1) * TILE - 48, w: 32, h: 48 };
-      else if (ch === 'j') this.juice.push({ x: tx * TILE + 3, y: ty * TILE + 2, w: 10, h: 12, got: false });
+      else if (ch === 'a' || ch === 'j') this.apples.push({ x: tx * TILE + 3, y: ty * TILE + 2, w: 10, h: 12, got: false });
       else if (ch === 'c') this.crates.push(this.makeCrate(tx * TILE + 1, (ty + 1) * TILE - PHYS.crate));
       else if (ch === 'B') this.blocks.push(this.makeBody('block', tx * TILE, (ty + 1) * TILE - 32, 32, 32));
     }));
@@ -45,7 +50,7 @@ class World {
     if (!this.rc) this.rc = this.makeRC(this.droober.x, this.droober.y - PHYS.rcH);
     if (def.rcRiding) this.rc.mode = 'ride';
     for (const o of def.objs || []) this.addObj(o);
-    this.juiceTotal = this.juice.length;
+    this.appleTotal = this.apples.length;
     this.camX = 0; this.camY = 0;
     this.snapCamera();
   }
@@ -55,12 +60,13 @@ class World {
   makeDroober(tx, ty) {
     const b = this.makeBody('droober', tx * TILE + 1, (ty + 1) * TILE - PHYS.standH, PHYS.dw, PHYS.standH);
     Object.assign(b, { facing: 1, crouch: false, jumps: 0, coyote: 0, buffer: 0, carry: null, glideT: 0, gliding: false,
-      pushing: false, cranking: null, drop: 0, anim: 0, landT: 0, dead: false, wasGround: true });
+      pushing: false, cranking: null, drop: 0, anim: 0, landT: 0, dead: false, wasGround: true,
+      straws: 0, smokeCD: 0, cling: 0, hang: false, portalCD: 0 });
     return b;
   }
   makeRC(x, y) {
     const b = this.makeBody('rc', x, y, PHYS.rcW, PHYS.rcH);
-    Object.assign(b, { mode: 'free', facing: 1, anim: 0, mountT: 0, followT: 0, dead: false });
+    Object.assign(b, { mode: 'free', facing: 1, anim: 0, mountT: 0, followT: 0, dead: false, thick: 0, painting: false, portalCD: 0 });
     return b;
   }
   makeCrate(x, y) { return Object.assign(this.makeBody('crate', x, y, PHYS.crate, PHYS.crate), { held: false }); }
@@ -85,6 +91,28 @@ class World {
         break;
       }
       case 'sign': this.signs.push({ x, y, w: TILE, h: TILE, text: o.text }); break;
+      case 'fan': {
+        const dir = o.dir || 'u', len = (o.len || 4) * TILE, wd = (o.w || 1) * TILE;
+        const r = dir === 'u' ? { x, y: y - len, w: wd, h: len } : dir === 'd' ? { x, y: y + TILE, w: wd, h: len }
+          : dir === 'l' ? { x: x - len, y, w: len, h: wd } : { x: x + TILE, y, w: len, h: wd };
+        this.fans.push({ x, y, w: dir === 'u' || dir === 'd' ? wd : TILE, h: dir === 'u' || dir === 'd' ? TILE : wd, dir, region: r, ch: o.ch, inv: !!o.inv, on: true, spin: 0 });
+        break;
+      }
+      case 'shadow': {
+        const sx = x + 1, x0 = o.x0 != null ? o.x0 * TILE + 1 : sx, x1 = o.x1 != null ? o.x1 * TILE + 1 : sx;
+        this.shadows.push({ kind: 'shadow', x: sx, y: y + TILE - 26, w: 14, h: 26, fx: sx, x0, x1, speed: o.speed || 0.5, facing: o.facing || 1,
+          range: (o.range || 6) * TILE, wait: 0, alert: 0, turn: o.turn || 0, t: 0, sight: null });
+        break;
+      }
+      case 'portal': {
+        const face = o.face || 'none';
+        const r = face === 'none' ? { x: x + 2, y: y - TILE, w: 12, h: 32 } : face === 'up' ? { x, y: y + TILE - 4, w: 32, h: 4 } : { x, y, w: 32, h: 4 };
+        this.portals.push({ ...r, pair: o.pair, face, ch: o.ch, box: o.box, active: false, spin: 0 });
+        break;
+      }
+      case 'juicebox': this.boxes.push({ x, y, w: TILE, h: TILE, id: o.id, powered: false }); break;
+      case 'straw': this.straws.push({ x: x + 4, y: y + 2, w: 8, h: 12, got: false }); break;
+      case 'puddle': this.puddles.push({ x, y: y + TILE - 4, w: TILE, h: 4, amount: o.amount || 6, used: false }); break;
       default: throw new Error('unknown object ' + o.t);
     }
   }
@@ -214,6 +242,7 @@ class World {
     if (inp.pressed.call) this.callRC();
 
     this.updateDevicesPre();
+    this.updateGoo();
     this.updateDroober(di);
     this.updateRC(ri);
     this.updateCrates();
@@ -221,6 +250,9 @@ class World {
     this.updatePlates();
     this.computeSignals();
     this.updateDevicesPost();
+    this.updateWorld2();
+    this.checkPortals();
+    this.updateShadows();
     this.checkHazards();
     this.checkPickups();
     this.checkExit();
@@ -304,6 +336,19 @@ class World {
     // interact / grab / throw
     if (actP && !d.cranking) this.drooberAct(d, down);
 
+    // smoke puff
+    if (d.smokeCD > 0) d.smokeCD--;
+    if (inp && inp.pressed.ability && this.powers) {
+      if (d.smokeCD === 0) {
+        const c = center(d);
+        this.smokes.push({ x: c.x - 34, y: c.y - 34, w: 68, h: 60, life: PHYS.smokeLife });
+        d.smokeCD = PHYS.smokeCD; this.emit('smoke');
+      } else this.emit('nope');
+    }
+
+    // goo: hang from gooey ceilings, climb gooey walls
+    if (d.hang || d.cling) { if (this.updateGooMove(d, inp, dir, down, jumpP)) return; }
+
     // horizontal
     let max = d.crouch ? PHYS.crawl : run ? (d.carry ? PHYS.carryRun : PHYS.run) : PHYS.walk;
     if (d.pushing) max = Math.min(max, PHYS.push);
@@ -348,7 +393,15 @@ class World {
       if (d.vy > 0) {
         if (d.vy > 3) { this.emit('land'); this.dust(d, 4); d.landT = 6; }
         d.vy = 0;
-      } else { d.vy = 0; this.emit('bonk'); }
+      } else {
+        d.vy = 0;
+        if (!d.carry && this.gooAbove(d)) { d.hang = true; d.gliding = false; this.emit('stick'); }
+        else this.emit('bonk');
+      }
+    }
+    // pressing into a gooey wall grabs it
+    if (!d.hang && !d.carry && dir && (!this.grounded(d) || (inp && inp.held.up)) && this.collide(d, d.x + dir, d.y, 0) && this.gooSide(d, dir)) {
+      d.cling = dir; d.vx = 0; d.vy = 0; d.gliding = false; this.emit('stick');
     }
     const g2 = this.grounded(d);
     if (g2 && !d.wasGround && !hitY) d.landT = 4;
@@ -388,6 +441,12 @@ class World {
     const btn = this.buttons.find(near);
     if (btn) { this.pressButton(btn); return; }
     if (this.cranks.find(near)) return;
+    const box = this.boxes.find(b => !b.powered && rectHit(d.x - 8, d.y, d.w + 16, d.h, b));
+    if (box) {
+      if (d.straws > 0) { d.straws--; box.powered = true; this.emit('sip'); this.puff(box.x + 8, box.y, '#f6c02c', 12); this.toast('JUICE POWER! THE PORTALS WAKE UP.'); }
+      else { this.toast('NEEDS A STRAW'); this.emit('nope'); }
+      return;
+    }
     // pick up a crate in reach (in front at foot/waist level)
     const rx = d.facing > 0 ? d.x + d.w - 2 : d.x - 10;
     const crate = this.crates.find(c => !c.held && rectHit(rx, d.y + 8, 12, d.h - 6, c) && c.y >= d.y - 4);
@@ -445,6 +504,7 @@ class World {
       const dx = dc.x - rcc.x, dy = (d.y - 4) - rcc.y, dist = Math.hypot(dx, dy);
       if (dist < 22) { this.mountRC(); return; }
       ix = dx / dist; iy = dy / dist; fast = true;
+      if (rc.climbT > 0) { rc.climbT--; iy = -1; ix = Math.sign(dx) * 0.3; }   // bumped into something: go over it
       if (++rc.followT > 900) { rc.mode = 'free'; this.toast('RC GOT STUCK'); }
     }
     const len = Math.hypot(ix, iy) || 1;
@@ -455,8 +515,11 @@ class World {
     if (iy) rc.vy += Math.sign(ty - rc.vy) * Math.min(Math.abs(ty - rc.vy), PHYS.rcAccel);
     else if (inp) rc.vy *= 0.85;                       // hovers while you steer him
     else rc.vy = Math.min(PHYS.rcMaxSink, rc.vy + PHYS.rcSink); // left alone, the goo settles
-    if (this.moveX(rc, rc.vx)) rc.vx = 0;
+    this.fanPush(rc);
+    rc.painting = !!(inp && inp.held.ability && this.powers);
+    if (this.moveX(rc, rc.vx)) { rc.vx = 0; if (rc.mode === 'follow' && !rc.climbT) rc.climbT = 28; }
     if (this.moveY(rc, rc.vy)) { if (rc.vy > 1) this.emit('splat'); rc.vy = 0; }
+    if (rc.painting) this.paintGoo(rc);
     rc.onGround = this.grounded(rc);
     if (Math.abs(rc.vx) + Math.abs(rc.vy) > 1.2 && this.frame % 12 === 0) this.fx.push({ kind: 'drip', x: rc.x + 6, y: rc.y + rc.h, vx: 0, vy: 0.5, life: 30, color: '#1cd2f0' });
   }
@@ -467,6 +530,7 @@ class World {
     const btn = this.buttons.find(near);
     if (btn) { this.pressButton(btn); return; }
     if (this.cranks.find(near)) { this.toast('TOO HEAVY FOR GOO. DROOBER HAS TO CRANK IT.'); this.emit('nope'); return; }
+    if (this.boxes.find(b => !b.powered && near(b))) { this.toast("RC CAN'T HOLD A STRAW. DROOBER CAN."); this.emit('nope'); return; }
     if (this.crates.find(c => !c.held && near(c)) || this.blocks.find(near)) { this.toast("RC CAN'T LIFT THAT"); this.emit('nope'); return; }
     this.emit('blip');
   }
@@ -476,6 +540,7 @@ class World {
     for (const c of this.crates) {
       if (c.held) continue;
       c.vy = Math.min(PHYS.maxFall, c.vy + PHYS.grav);
+      this.fanPush(c);
       if (c.vx) {
         const s = Math.sign(c.vx);
         c.rx += c.vx; let m = Math.round(c.rx); c.rx -= m;
@@ -608,6 +673,7 @@ class World {
     if (d.dead || this.state !== 'play') return;
     d.dead = true; d.deathWhy = why;
     if (d.carry) { d.carry.held = false; d.carry = null; }
+    d.hang = false; d.cling = 0;
     this.state = 'dead'; this.stateT = 0;
     this.emit('die');
     this.puff(d.x + d.w / 2, d.y + d.h / 2, '#f39cc0', 14);
@@ -623,15 +689,15 @@ class World {
   }
   checkPickups() {
     const d = this.droober, rc = this.rc;
-    for (const j of this.juice) {
+    for (const j of this.apples) {
       if (j.got) continue;
       if ((!d.dead && overlaps(d, j)) || (rc.mode !== 'ride' && overlaps(rc, j))) {
-        j.got = true; this.emit('juice');
+        j.got = true; this.emit('apple');
         this.puff(j.x + 5, j.y + 6, '#f6c02c', 10);
       }
     }
   }
-  juiceGot() { return this.juice.filter(j => j.got).length; }
+  applesGot() { return this.apples.filter(j => j.got).length; }
   checkExit() {
     const d = this.droober, rc = this.rc, e = this.exit;
     if (!e || d.dead) return;
@@ -646,6 +712,180 @@ class World {
     }
   }
 
+  // ---------- world 2: goo ----------
+  gooAt(tx, ty) {
+    if (this.tile(tx, ty) !== T_SOLID) return null;
+    const g = this.goo.get(ty * this.W + tx);
+    return g && g.until > this.frame ? g : null;
+  }
+  gooAbove(d) {
+    const ty = Math.floor((d.y - 1) / TILE);
+    for (let tx = Math.floor(d.x / TILE); tx <= Math.floor((d.x + d.w - 1) / TILE); tx++) if (this.gooAt(tx, ty)) return true;
+    return false;
+  }
+  gooSide(d, dir) {
+    const tx = dir > 0 ? Math.floor((d.x + d.w) / TILE) : Math.floor((d.x - 1) / TILE);
+    for (let ty = Math.floor((d.y + 4) / TILE); ty <= Math.floor((d.y + d.h - 6) / TILE); ty++) if (this.gooAt(tx, ty)) return true;
+    return false;
+  }
+  updateGoo() {
+    if (this.frame % 30 === 0) for (const [k, g] of this.goo) if (g.until <= this.frame) this.goo.delete(k);
+  }
+  paintGoo(rc) {
+    // coats walls and ceilings RC is touching; never the floor under him
+    const x0 = Math.floor((rc.x - 2) / TILE), x1 = Math.floor((rc.x + rc.w + 1) / TILE);
+    const y0 = Math.floor((rc.y - 2) / TILE), y1 = Math.floor((rc.y + rc.h - 1) / TILE);
+    let painted = false;
+    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
+      if (this.tile(tx, ty) !== T_SOLID || ty * TILE >= rc.y + rc.h) continue;
+      const k = ty * this.W + tx, g = this.goo.get(k);
+      if (g && g.thick) continue;
+      if (rc.thick > 0) { this.goo.set(k, { until: Infinity, thick: true }); rc.thick--; painted = true; }
+      else { if (!g || g.until - this.frame < PHYS.gooLife - 20) painted = true; this.goo.set(k, { until: this.frame + PHYS.gooLife, thick: false }); }
+    }
+    if (painted && this.frame % 6 === 0) this.emit('goo');
+  }
+  // returns true when it fully handled Droober's movement this frame
+  updateGooMove(d, inp, dir, down, jumpP) {
+    if (d.hang) {
+      if (!this.gooAbove(d) || jumpP || down || d.carry) { d.hang = false; d.vy = 0.5; return false; }
+      d.vy = 0; d.jumps = 1; d.glideT = 0;
+      d.vx = dir * PHYS.shimmy;
+      if (dir) d.facing = dir;
+      this.moveX(d, d.vx);
+      if (!this.gooAbove(d)) { d.hang = false; return false; }
+      d.anim += Math.abs(d.vx) * 0.1;
+      return true;
+    }
+    if (d.cling) {
+      const side = d.cling;
+      if (jumpP) { // wall jump
+        d.cling = 0; d.vx = -side * 2.4; d.vy = -4.6; d.jumps = 1; d.facing = -side;
+        this.emit('jump'); return false;
+      }
+      if (dir === -side || !this.gooSide(d, side)) {
+        const up = inp && inp.held.up;
+        d.cling = 0;
+        if (up && !this.collide(d, d.x + side, d.y - 4, 0)) d.vy = -3.2; // mantle over the top
+        return false;
+      }
+      const up = inp && inp.held.up;
+      d.vx = 0; d.vy = up ? -PHYS.climb : down ? PHYS.climb : 0; d.jumps = 1; d.glideT = 0;
+      d.facing = side;
+      if (this.moveY(d, d.vy) && d.vy > 0) { d.cling = 0; return false; }
+      if (!up && !down) d.ry = 0;
+      d.anim += Math.abs(d.vy) * 0.1;
+      return true;
+    }
+    return false;
+  }
+
+  // ---------- world 2: fans, smoke, portals, shadows ----------
+  fanPush(b) {
+    for (const f of this.fans) {
+      if (!f.on || !overlaps(b, f.region)) continue;
+      const F = PHYS.fanForce;
+      if (f.dir === 'u') b.vy -= F; else if (f.dir === 'd') b.vy += F; else if (f.dir === 'l') b.vx -= F; else b.vx += F;
+      b.vx = Math.max(-3.2, Math.min(3.2, b.vx)); b.vy = Math.max(-3.2, Math.min(3.2, b.vy));
+    }
+  }
+  updateWorld2() {
+    for (const f of this.fans) {
+      f.on = f.ch == null ? true : (this.count(f.ch) > 0) !== f.inv;
+      if (f.on) { f.spin += 0.5; if (this.frame % 4 === 0) this.windFx(f); }
+    }
+    for (const sm of this.smokes) sm.life--;
+    this.smokes = this.smokes.filter(sm => sm.life > 0);
+    for (const p of this.portals) {
+      const pair = this.portals.filter(q => q.pair === p.pair);
+      const was = p.active;
+      p.active = pair.length === 2 && pair.every(q => (q.box == null || this.boxes.some(b => b.id === q.box && b.powered)) && (q.ch == null || this.count(q.ch) > 0));
+      if (p.active) p.spin += 0.15;
+      if (p.active && !was) this.emit('portalOn');
+    }
+    const d = this.droober, rc = this.rc;
+    for (const s of this.straws) if (!s.got && !d.dead && overlaps(d, s)) { s.got = true; d.straws++; this.emit('straw'); this.puff(s.x + 4, s.y + 6, '#ffffff', 6); }
+    for (const p of this.puddles) if (!p.used && rc.mode !== 'ride' && overlaps(rc, p)) {
+      p.used = true; rc.thick += p.amount; this.emit('slurp');
+      this.toast('THICK GOO! WHAT RC PAINTS NOW STAYS PUT.');
+    }
+  }
+  checkPortals() {
+    const bodies = [this.droober, ...this.crates.filter(c => !c.held)];
+    if (this.rc.mode !== 'ride') bodies.push(this.rc);
+    for (const b of bodies) {
+      if (b.dead) continue;
+      if (b.portalCD > 0) { b.portalCD--; continue; }
+      const p = this.portals.find(p => p.active && overlaps(b, p) &&
+        (p.face === 'none' ? (() => { const c = center(b); return c.x > p.x && c.x < p.x + p.w; })() : p.face === 'up' ? b.vy >= 0 : b.vy <= 0));
+      if (!p) continue;
+      const q = this.portals.find(o => o !== p && o.pair === p.pair);
+      const sp = Math.max(Math.abs(b.vx), Math.abs(b.vy), 2.5);
+      let nx, ny, vx = b.vx, vy = b.vy;
+      if (q.face === 'none') { nx = q.x + q.w / 2 - b.w / 2; ny = q.y + q.h - b.h; }
+      else if (q.face === 'up') { nx = q.x + q.w / 2 - b.w / 2; ny = q.y - b.h - 1; vy = -Math.max(sp, 4.5); }
+      else { nx = q.x + q.w / 2 - b.w / 2; ny = q.y + q.h + 1; vy = Math.max(Math.abs(b.vy), 1); vx = 0; }   // ceiling portal: drop straight down
+      nx = Math.round(nx); ny = Math.round(ny);
+      if (this.collide(b, nx, ny, 0)) continue;
+      this.puff(b.x + b.w / 2, b.y + b.h / 2, '#f6c02c', 8);
+      b.x = nx; b.y = ny; b.vx = vx; b.vy = vy; b.rx = b.ry = 0;
+      if (b.carry) this.syncCarry(b);
+      b.portalCD = 30;
+      if (b.kind === 'droober') { b.hang = false; b.cling = 0; }
+      this.puff(b.x + b.w / 2, b.y + b.h / 2, '#f6c02c', 8);
+      this.emit('portal');
+    }
+  }
+  sightRect(s) {
+    // horizontal view band in front of the shadow, cut short by walls and closed doors
+    const eyeY = s.y + 8, top = s.y - 18, bot = s.y + s.h;
+    let len = 0;
+    const step = s.facing;
+    let x = step > 0 ? s.x + s.w : s.x;
+    while (len < s.range) {
+      const px = x + step * (len + 1);
+      const tx = Math.floor(px / TILE);
+      if (this.tile(tx, Math.floor(eyeY / TILE)) === T_SOLID || this.tile(tx, Math.floor((bot - 2) / TILE)) === T_SOLID) break;
+      if (this.doors.some(d => d.h > 0 && px >= d.x && px < d.x + d.w && eyeY >= d.y && eyeY < d.y + d.h)) break;
+      len++;
+    }
+    return step > 0 ? { x, y: top, w: len, h: bot - top } : { x: x - len, y: top, w: len, h: bot - top };
+  }
+  hiddenFrom(s, d) {
+    const c = center(d);
+    if (this.smokes.some(sm => c.x > sm.x && c.x < sm.x + sm.w && c.y > sm.y && c.y < sm.y + sm.h)) return true;
+    const ex = s.x + s.w / 2, lo = Math.min(ex, c.x), hi = Math.max(ex, c.x);
+    return this.smokes.some(sm => sm.x < hi && sm.x + sm.w > lo && sm.y < s.y + 10 && sm.y + sm.h > s.y + 6);
+  }
+  updateShadows() {
+    const d = this.droober;
+    for (const s of this.shadows) {
+      s.t++;
+      if (s.alert === 0) {
+        if (s.wait > 0) { if (--s.wait === 0) s.facing = -s.facing; }
+        else if (s.x0 !== s.x1) {
+          s.fx += s.facing * s.speed;
+          if (s.facing > 0 && s.fx >= s.x1) { s.fx = s.x1; s.wait = 50; }
+          if (s.facing < 0 && s.fx <= s.x0) { s.fx = s.x0; s.wait = 50; }
+          s.x = Math.round(s.fx);
+        } else if (s.turn && s.t % s.turn === 0) s.facing = -s.facing;
+      }
+      s.sight = this.sightRect(s);
+      if (d.dead) continue;
+      const seen = overlaps(d, s.sight) && !this.hiddenFrom(s, d);
+      if (overlaps(d, s)) { this.kill('shadow'); return; }
+      if (seen) { if (s.alert === 0) this.emit('spotted'); s.alert++; } else s.alert = Math.max(0, s.alert - 2);
+      if (s.alert >= PHYS.shadowSee) { this.kill('shadow'); return; }
+    }
+  }
+  windFx(f) {
+    const r = f.region;
+    const v = { u: [0, -2], d: [0, 2], l: [-2, 0], r: [2, 0] }[f.dir];
+    const x = f.dir === 'l' ? r.x + r.w : f.dir === 'r' ? r.x : r.x + Math.random() * r.w;
+    const y = f.dir === 'u' ? r.y + r.h : f.dir === 'd' ? r.y : r.y + Math.random() * r.h;
+    this.fx.push({ kind: 'wind', x, y, vx: v[0], vy: v[1], life: Math.max(r.w, r.h) / 2, color: 'rgba(255,255,255,0.7)' });
+  }
+
   // ---------- fx / camera ----------
   emit(type) { this.events.push(type); }
   toast(text) { this.toasts = [{ text, t: 140 }]; }
@@ -656,7 +896,7 @@ class World {
     for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, s = 0.5 + Math.random() * 1.8; this.fx.push({ kind: 'dust', x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 0.5, life: 25 + Math.random() * 15, color }); }
   }
   updateFx() {
-    for (const p of this.fx) { p.x += p.vx; p.y += p.vy; p.vy += p.kind === 'confetti' ? 0.08 : p.kind === 'drip' ? 0.05 : 0.02; p.vx *= 0.97; p.life--; }
+    for (const p of this.fx) { p.x += p.vx; p.y += p.vy; p.vy += p.kind === 'confetti' ? 0.08 : p.kind === 'drip' ? 0.05 : p.kind === 'wind' ? 0 : 0.02; p.vx *= 0.97; p.life--; }
     this.fx = this.fx.filter(p => p.life > 0);
     for (const t of this.toasts) t.t--;
     this.toasts = this.toasts.filter(t => t.t > 0);

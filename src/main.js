@@ -6,9 +6,15 @@ ctx.imageSmoothingEnabled = false;
 
 const SAVE_KEY = 'droober-two-places-v1';
 function loadSave() {
-  try { return Object.assign({ unlocked: 1, best: {}, muted: false }, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); }
-  catch { return { unlocked: 1, best: {}, muted: false }; }
+  let s;
+  try { s = Object.assign({ unlocked: 1, best: {}, muted: false }, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); }
+  catch { s = { unlocked: 1, best: {}, muted: false }; }
+  // v1 saves counted juice boxes; they are apples now
+  for (const b of Object.values(s.best)) if (b.apples == null) b.apples = b.juice || 0;
+  return s;
 }
+const WORLD_NAMES = { 1: 'PURPLE DUSK', 2: 'SHROOMWOOD' };
+const worldOf = i => (LEVELS[i] && LEVELS[i].world) || 1;
 function writeSave() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch {} }
 const save = loadSave();
 
@@ -21,6 +27,7 @@ function startLevel(i, keepTime = false) {
   game.levelIndex = i;
   game.world = new World(LEVELS[i]);
   game.levelCanvas = prerenderLevel(game.world);
+  Audio8.setTrack(worldOf(i));
   if (!keepTime) { game.levelTime = 0; game.deaths = 0; }
   game.screen = 'play';
 }
@@ -56,7 +63,7 @@ function update() {
         Audio8.sfx('select');
         const pick = TITLE_MENU[game.menuIndex];
         if (pick === 'PLAY') startLevel(Math.min(save.unlocked, LEVELS.length) - 1);
-        else if (pick === 'LEVELS') { game.screen = 'select'; game.menuIndex = 0; }
+        else if (pick === 'LEVELS') { game.screen = 'select'; game.menuIndex = Math.min(save.unlocked, LEVELS.length) - 1; }
         else if (pick === 'CONTROLS') game.showControls = true;
         else if (pick === 'SOUND') toggleSound();
       }
@@ -115,16 +122,16 @@ function update() {
 function recordClear() {
   const w = game.world, i = game.levelIndex;
   const prev = save.best[i];
-  const juice = w.juiceGot();
+  const apples = w.applesGot();
   game.newBest = !prev || game.levelTime < prev.time;
-  save.best[i] = { time: prev ? Math.min(prev.time, game.levelTime) : game.levelTime, juice: Math.max(prev ? prev.juice : 0, juice), total: w.juiceTotal };
+  save.best[i] = { time: prev ? Math.min(prev.time, game.levelTime) : game.levelTime, apples: Math.max(prev ? prev.apples : 0, apples), total: w.appleTotal };
   save.unlocked = Math.max(save.unlocked, Math.min(LEVELS.length, i + 2));
   writeSave();
 }
 
 // ---------- screens ----------
 function drawTitle() {
-  drawBackground(ctx, game.frame * 0.4, 0, game.frame);
+  drawBackground(ctx, game.frame * 0.4, 0, game.frame, save.unlocked > 10 ? 2 : 1);
   // ground strip
   px(ctx, C.ink, 0, 170, VIEW_W, 1); px(ctx, C.lime, 0, 171, VIEW_W, 3); px(ctx, C.stone, 0, 174, VIEW_W, 42);
   for (let x = 0; x < VIEW_W; x += 16) { px(ctx, C.stoneD, x, 181, 1, 8); px(ctx, C.stoneD, x, 189, 16, 1); }
@@ -147,18 +154,20 @@ function drawTitle() {
   drawTextC(ctx, 'SPACE / ENTER TO PICK. M MUTES.', VIEW_W / 2, 204, C.cream, 1, C.ink);
 }
 function drawSelect() {
-  drawBackground(ctx, game.frame * 0.4, 0, game.frame);
-  drawTextC(ctx, 'PICK A LEVEL', VIEW_W / 2, 12, C.cream, 2, C.ink);
+  const page = Math.floor(game.menuIndex / 10), world = page + 1;
+  drawBackground(ctx, game.frame * 0.4, 0, game.frame, world);
+  drawTextC(ctx, `WORLD ${world}: ${WORLD_NAMES[world] || ''}`, VIEW_W / 2, 12, C.cream, 2, C.ink);
   LEVELS.forEach((L, i) => {
-    const col = i % 5, row = Math.floor(i / 5);
+    if (Math.floor(i / 10) !== page) return;
+    const col = i % 5, row = Math.floor((i % 10) / 5);
     const x = 22 + col * 70, y = 40 + row * 58;
     const locked = i >= save.unlocked, sel = i === game.menuIndex, best = save.best[i];
     panel(ctx, x, y, 60, 50, sel ? C.yellow : locked ? '#9c8fc4' : C.paper);
     drawTextC(ctx, String(i + 1), x + 30, y + 5, C.ink, 2);
     if (locked) { drawTextC(ctx, 'LOCKED', x + 30, y + 26, C.ink); }
     else if (best) {
-      drawJuice(ctx, { x: x + 8, y: y + 23 }, 0);
-      drawText(ctx, `${best.juice}/${best.total}`, x + 21, y + 26, C.ink);
+      drawApple(ctx, { x: x + 8, y: y + 23 }, 0);
+      drawText(ctx, `${best.apples}/${best.total}`, x + 21, y + 26, C.ink);
       drawText(ctx, fmtTime(best.time), x + 18, y + 37, C.ink);
     } else drawTextC(ctx, 'NEW', x + 30, y + 30, C.purple);
   });
@@ -166,7 +175,7 @@ function drawSelect() {
   panel(ctx, 22, 162, 340, 34);
   drawTextC(ctx, game.menuIndex < save.unlocked ? L.name : '???', VIEW_W / 2, 167, C.ink, 1);
   drawTextC(ctx, game.menuIndex < save.unlocked ? L.blurb : 'BEAT THE LEVEL BEFORE IT.', VIEW_W / 2, 180, C.purpleD, 1);
-  drawTextC(ctx, 'ESC: BACK', VIEW_W / 2, 204, C.cream, 1, C.ink);
+  drawTextC(ctx, LEVELS.length > 10 ? 'DOWN PAST THE LAST ROW FOR THE NEXT WORLD.  ESC: BACK' : 'ESC: BACK', VIEW_W / 2, 204, C.cream, 1, C.ink);
 }
 function drawPause() {
   ctx.fillStyle = 'rgba(34,22,58,0.6)'; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
@@ -192,13 +201,15 @@ function drawControls() {
     ['CALL RC / DROP RC', 'F'],
     ['RC FLIES', 'WASD / ARROWS'],
     ['GLIDE', 'RC ABOARD: DOUBLE JUMP, HOLD'],
+    ['SMOKE (DROOBER, W2)', 'C'],
+    ['PAINT GOO (RC, W2)', 'HOLD C'],
     ['RESTART / PAUSE', 'R / ESC'],
   ];
   rows.forEach(([a, b], i) => {
-    drawText(ctx, a, 30, 40 + i * 13, C.purpleD);
-    drawText(ctx, b, 168, 40 + i * 13, C.ink);
+    drawText(ctx, a, 30, 36 + i * 12, C.purpleD);
+    drawText(ctx, b, 168, 36 + i * 12, C.ink);
   });
-  drawTextC(ctx, 'GAMEPAD: A JUMP  X USE  B CALL  LB/RB SWAP  RT RUN', VIEW_W / 2, 176, C.purpleD);
+  drawTextC(ctx, 'PAD: A JUMP X USE B CALL Y SMOKE/GOO LB/RB SWAP RT RUN', VIEW_W / 2, 176, C.purpleD);
   drawTextC(ctx, 'PRESS SPACE', VIEW_W / 2, 192, C.ink);
 }
 function drawClear() {
@@ -207,21 +218,21 @@ function drawClear() {
   const best = save.best[game.levelIndex];
   panel(ctx, VIEW_W / 2 - 90, 40, 180, 96);
   drawTextC(ctx, 'LEVEL CLEAR!', VIEW_W / 2, 48, C.purple, 2);
-  drawJuice(ctx, { x: VIEW_W / 2 - 50, y: 72 }, 0);
-  drawText(ctx, `JUICE  ${w.juiceGot()}/${w.juiceTotal}`, VIEW_W / 2 - 36, 75, C.ink);
+  drawApple(ctx, { x: VIEW_W / 2 - 50, y: 72 }, 0);
+  drawText(ctx, `APPLES ${w.applesGot()}/${w.appleTotal}`, VIEW_W / 2 - 36, 75, C.ink);
   drawText(ctx, `TIME   ${fmtTime(game.levelTime)}${game.newBest ? '  BEST!' : ''}`, VIEW_W / 2 - 50, 89, C.ink);
   drawText(ctx, `OOPS   ${game.deaths}`, VIEW_W / 2 - 50, 101, C.ink);
   if ((game.frame >> 4) % 2) drawTextC(ctx, game.levelIndex + 1 < LEVELS.length ? 'SPACE: NEXT LEVEL' : 'SPACE: FINISH', VIEW_W / 2, 120, C.purpleD);
 }
 function drawEnd() {
-  drawBackground(ctx, game.frame * 0.6, 0, game.frame);
+  drawBackground(ctx, game.frame * 0.6, 0, game.frame, worldOf(LEVELS.length - 1));
   px(ctx, C.ink, 0, 170, VIEW_W, 1); px(ctx, C.lime, 0, 171, VIEW_W, 3); px(ctx, C.stone, 0, 174, VIEW_W, 42);
-  const tot = Object.values(save.best).reduce((s, b) => s + b.juice, 0);
+  const tot = Object.values(save.best).reduce((s, b) => s + (b.apples || 0), 0);
   const all = LEVELS.reduce((s, _, i) => s + (save.best[i] ? save.best[i].total : 0), 0);
   drawTextC(ctx, 'YOU DID IT!', VIEW_W / 2, 24, C.yellow, 3, C.ink);
   drawTextC(ctx, 'DROOBER AND RC MADE IT HOME,', VIEW_W / 2, 60, C.cream, 1, C.ink);
   drawTextC(ctx, 'USUALLY IN TWO PLACES AT ONCE.', VIEW_W / 2, 72, C.cream, 1, C.ink);
-  drawTextC(ctx, `JUICE BOXES: ${tot}/${all}`, VIEW_W / 2, 92, C.cream, 1, C.ink);
+  drawTextC(ctx, `APPLES: ${tot}/${all}`, VIEW_W / 2, 92, C.cream, 1, C.ink);
   drawFrameAt(ctx, 'wave', VIEW_W / 2 - 30, 172, 1, 2);
   const hop = Math.abs(Math.round(Math.sin(game.frame * 0.1) * 10));
   drawFrameAt(ctx, 'rcFront', VIEW_W / 2 + 40, 172 - hop, 0, 2);

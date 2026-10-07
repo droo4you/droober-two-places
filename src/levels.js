@@ -1,4 +1,4 @@
-// Level definitions. Each level is built with a tiny tile-coordinate builder so the
+// World 1 level definitions (World 2 lives in levels2.js). Each level is built with a tiny tile-coordinate builder so the
 // geometry reads as intent ("a 5-tile wall here") instead of hand-counted ASCII.
 //
 // Reach facts (measured by tests/physics.mjs, in tiles):
@@ -21,7 +21,7 @@ function buildLevel(name, w, h, opts, fn) {
     },
     spikes(x0, x1, y) { this.fill(x0, y, x1, y, '^'); },
     D(x, y) { g[y][x] = 'D'; }, R(x, y) { g[y][x] = 'R'; },
-    exit(x, y) { g[y][x] = 'E'; }, juice(x, y) { g[y][x] = 'j'; },
+    exit(x, y) { g[y][x] = 'E'; }, apple(x, y) { g[y][x] = 'a'; },
     crate(x, y) { g[y][x] = 'c'; }, block(x, y) { g[y][x] = 'B'; },
     plate(x, y, ch, heavy) { objs.push({ t: 'plate', x, y, ch, heavy }); },
     button(x, y, ch, time) { objs.push({ t: 'button', x, y, ch, time }); },
@@ -31,6 +31,12 @@ function buildLevel(name, w, h, opts, fn) {
     mover(x, y, o) { objs.push({ t: 'mover', x, y, ...o }); },
     zap(x, y, o) { objs.push({ t: 'zap', x, y, ...o }); },
     sign(x, y, text) { objs.push({ t: 'sign', x, y, text }); },
+    fan(x, y, o) { objs.push({ t: 'fan', x, y, ...o }); },
+    shadow(x, y, o = {}) { objs.push({ t: 'shadow', x, y, ...o }); },
+    portal(x, y, o) { objs.push({ t: 'portal', x, y, ...o }); },
+    juicebox(x, y, id) { objs.push({ t: 'juicebox', x, y, id }); },
+    straw(x, y) { objs.push({ t: 'straw', x, y }); },
+    puddle(x, y, amount) { objs.push({ t: 'puddle', x, y, amount }); },
   };
   fn(b);
   return { name, ...opts, grid: g.map(r => r.join('')), objs };
@@ -46,13 +52,13 @@ const LEVELS = [
     b.fill(11, 10, 15, 11);                       // 2-tile step
     b.sign(14, 9, 'TOO TALL? PRESS JUMP AGAIN IN THE AIR TO DOUBLE JUMP.');
     b.fill(16, 7, 24, 11);                        // 3 more up: double jump
-    b.juice(13, 7); b.juice(20, 3);
+    b.apple(13, 7); b.apple(20, 3);
     b.sign(23, 6, 'SPIKES AHEAD. RUN, JUMP, DOUBLE JUMP.');
     b.spikes(28, 33, 12); b.fill(28, 13, 33, 13);
-    b.juice(31, 8);
+    b.apple(31, 8);
     b.sign(35, 11, 'LOW CEILING. HOLD S OR DOWN TO CROUCH.');
     b.fill(37, 1, 41, 9);                         // 2-tile crawlspace
-    b.juice(39, 11);
+    b.apple(39, 11);
     b.exit(44, 11);
   }),
 
@@ -66,11 +72,11 @@ const LEVELS = [
     b.button(15, 9, 'A');
     b.sign(14, 11, 'PRESS E TO PUSH BUTTONS.');
     b.fill(19, 1, 23, 5); b.clear(20, 2, 22, 4); b.set(21, 5, '%');   // goo-only pocket
-    b.juice(21, 3);
-    b.fill(26, 8, 27, 11); b.juice(27, 6);
+    b.apple(21, 3);
+    b.fill(26, 8, 27, 11); b.apple(27, 6);
     b.sign(21, 11, 'AS DROOBER, PRESS F TO CALL RC. UP CLOSE HE HOPS ON YOUR HEAD.');
     b.sign(30, 11, 'BOTH OF YOU HAVE TO REACH THE EXIT.');
-    b.juice(5, 3);
+    b.apple(5, 3);
     b.exit(32, 11);
   }),
 
@@ -85,8 +91,8 @@ const LEVELS = [
     b.fill(19, 5, 23, 5); b.plate(21, 4, 'B');          // shelf only RC can reach
     b.sign(24, 11, 'ONE MORE DOOR. RC KNOWS A SHORTCUT.');
     b.fill(26, 1, 26, 8); b.set(26, 2, '%'); b.door(26, 9, 3, 'B');
-    b.fill(30, 9, 32, 9, '='); b.juice(31, 7);
-    b.juice(8, 4); b.juice(22, 2);
+    b.fill(30, 9, 32, 9, '='); b.apple(31, 7);
+    b.apple(8, 4); b.apple(22, 2);
     b.exit(35, 11);
   }),
 
@@ -101,7 +107,7 @@ const LEVELS = [
     b.crate(19, 11);
     b.sign(21, 11, 'CARRYING? ONLY ONE JUMP. SET IT DOWN AND CLIMB ON IT.');
     b.fill(26, 7, 27, 11);                         // 5 tiles: needs the crate
-    b.juice(9, 5); b.juice(21, 4); b.juice(39, 8);
+    b.apple(9, 5); b.apple(21, 4); b.apple(39, 8);
     b.exit(37, 11);
   }),
 
@@ -111,25 +117,25 @@ const LEVELS = [
     b.sign(4, 11, 'PRESS F NEAR RC TO PUT HIM ON YOUR HEAD.');
     b.sign(9, 11, 'WITH RC ABOARD: DOUBLE JUMP, THEN HOLD JUMP TO GLIDE.');
     b.spikes(13, 24, 12); b.fill(13, 13, 24, 13);
-    b.juice(18, 6);
-    b.juice(30, 8);
+    b.apple(18, 6);
+    b.apple(30, 8);
     b.spikes(35, 47, 12); b.fill(35, 13, 47, 13);
-    b.juice(41, 6);
+    b.apple(41, 6);
     b.exit(51, 11);
   }),
 
   buildLevel('STAND-IN', 50, 14, { blurb: 'You need RC in two places. Find a stand-in.' }, b => {
     b.frame(12);
     b.fill(1, 2, 6, 6); b.clear(2, 3, 5, 5); b.set(6, 4, '%');      // goo-only button pocket
-    b.button(3, 4, 'B'); b.juice(4, 3);
+    b.button(3, 4, 'B'); b.apple(4, 3);
     b.fill(1, 7, 7, 7); b.door(7, 8, 4, 'B'); b.crate(4, 11);       // crate closet (tall enough to lift in)
     b.D(10, 11); b.R(12, 11);
     b.plate(14, 11, 'A');
     b.sign(9, 11, 'THE FAR DOOR NEEDS WEIGHT ON THIS PLATE. BUT THE GAP NEEDS RC...');
     b.spikes(17, 28, 12); b.fill(17, 13, 28, 13);
-    b.juice(22, 5);
+    b.apple(22, 5);
     b.fill(34, 1, 34, 8); b.door(34, 9, 3, 'A');
-    b.juice(41, 4);
+    b.apple(41, 4);
     b.exit(44, 11);
   }),
 
@@ -146,7 +152,7 @@ const LEVELS = [
     b.lever(20, 1, 'C');
     b.sign(31, 5, 'THAT LEVER UP THERE IS A JOB FOR GOO.');
     b.fill(36, 1, 36, 2); b.door(36, 3, 3, 'C');
-    b.juice(11, 5); b.juice(26, 6); b.juice(44, 3);
+    b.apple(11, 5); b.apple(26, 6); b.apple(44, 3);
     b.exit(42, 5);
   }),
 
@@ -157,17 +163,17 @@ const LEVELS = [
     b.sign(9, 15, 'HOLD E AT A CRANK TO TURN IT. RC IS TOO SQUISHY TO CRANK.');
     b.mover(12, 15, { w: 3, dy: -3, crank: 'k1', speed: 0.7 });       // lift: rises 3 tiles
     b.fill(15, 8, 22, 15);                                           // upper ledge, 8 tiles up
-    b.juice(9, 9);
+    b.apple(9, 9);
     b.plate(18, 7, 'Z');
     b.sign(16, 7, 'THE ZAP STOPS WHILE THIS PLATE IS HELD.');
     b.crank(21, 7, 'k2');
     b.mover(23, 8, { w: 3, dx: 11, crank: 'k2', speed: 0.7 });        // bridge over the pit
     b.spikes(23, 36, 16);
-    b.juice(29, 4);
+    b.apple(29, 4);
     b.fill(37, 8, 50, 15);
     b.clear(37, 10, 41, 10); b.clear(41, 8, 41, 9); b.set(37, 10, '%'); b.set(41, 8, '%');   // goo tunnel
     b.zap(39, 1, { dir: 'v', len: 7, ch: 'Z' });
-    b.juice(45, 3);
+    b.apple(45, 3);
     b.exit(47, 7);
   }),
 
@@ -177,12 +183,12 @@ const LEVELS = [
     b.button(4, 3, 'T', 600);
     b.sign(6, 11, 'RC HITS THE TIMER, HOPS ON (F), THEN DROOBER HUSTLES.');
     b.spikes(13, 17, 12); b.fill(13, 13, 17, 13);
-    b.juice(15, 7);
+    b.apple(15, 7);
     b.zap(25, 9, { dir: 'v', len: 3, blink: 100 });
     b.sign(22, 11, 'THAT ZAP BLINKS. WAIT FOR IT.');
     b.fill(30, 1, 32, 9);
     b.fill(40, 1, 40, 8); b.door(40, 9, 3, 'T');
-    b.juice(36, 9); b.juice(46, 4);
+    b.apple(36, 9); b.apple(46, 4);
     b.exit(51, 11);
   }),
 
@@ -194,13 +200,13 @@ const LEVELS = [
     b.sign(7, 12, 'THIS DOOR WANTS BOTH PLATES HELD. RC HAS SOMEWHERE BETTER TO BE.');
     b.fill(18, 1, 18, 12); b.door(18, 13, 3, 'A', { need: 2 });
     b.spikes(22, 33, 16);
-    b.juice(27, 9);
+    b.apple(27, 9);
     b.plate(37, 15, 'C');
     b.sign(35, 15, 'RC ON THE PLATE RUNS THE LIFT. RIDE IT UP.');
     b.mover(41, 15, { w: 2, dy: -7, ch: 'C', loop: true, speed: 0.9 });
     b.fill(43, 8, 62, 15);
     b.zap(50, 4, { dir: 'v', len: 4, blink: 110 });
-    b.juice(55, 3); b.juice(10, 9);
+    b.apple(55, 3); b.apple(10, 9);
     b.exit(59, 7);
   }),
 ];

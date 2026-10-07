@@ -2,6 +2,7 @@
 // simulation. If a level change breaks solvability, this fails.
 // Run: node tests/solve.mjs [levelNumber]
 import { loadGame, makeInput } from './harness.mjs';
+import { SOLUTIONS_W2 } from './solve2.mjs';
 const { World, LEVELS } = loadGame();
 
 const X = tx => tx * 16 + 8;          // tile center, px
@@ -297,6 +298,8 @@ const SOLUTIONS = [
   },
 ];
 
+SOLUTIONS.push(...SOLUTIONS_W2);
+
 const only = process.argv[2] ? Number(process.argv[2]) - 1 : null;
 let fails = 0;
 LEVELS.forEach((def, i) => {
@@ -305,7 +308,7 @@ LEVELS.forEach((def, i) => {
   const bot = makeBot(w);
   try {
     SOLUTIONS[i](bot);
-    console.log(`PASS #${i + 1} ${def.name}  (${bot.frames} frames, ${(bot.frames / 60).toFixed(1)}s, juice ${w.juiceGot()}/${w.juiceTotal})`);
+    console.log(`PASS #${i + 1} ${def.name}  (${bot.frames} frames, ${(bot.frames / 60).toFixed(1)}s, apples ${w.applesGot()}/${w.appleTotal})`);
   } catch (e) {
     fails++;
     console.log(`FAIL #${i + 1} ${def.name}: ${e.message}`);
